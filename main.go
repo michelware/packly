@@ -1,3 +1,13 @@
+// Packly is a small asset bundler and dependency manager for web projects.
+//
+// It reads its configuration from a "packly.ini" file in the current
+// directory and offers two commands:
+//
+//	packly install [--force]   download the third-party files listed in
+//	                           [dependencies] into <source>/vendor
+//	packly build [--watch]     copy the source folder to <target>/build,
+//	                           compile Sass entrypoints, and optionally
+//	                           rebuild whenever a file changes
 package main
 
 import (
@@ -25,6 +35,18 @@ import (
 	"gopkg.in/ini.v1"
 )
 
+// defaultIni is written to packly.ini when no configuration file exists yet.
+//
+// Supported keys:
+//   - [build] source:  folder holding the assets to bundle (default "assets")
+//   - [build] target:  folder receiving the output; files land in <target>/build
+//   - [build] ignore:  optional comma-separated paths, relative to source, to skip
+//   - [dependencies]:  one key per package, whose value is a comma-separated
+//     list of URLs (.zip archives are extracted, other files are copied as-is)
+//   - [sass] version:     dart-sass release to download
+//   - [sass] entrypoints: comma-separated .scss/.sass files, relative to source
+//   - [sass] style:       "compressed" (default) or "expanded"
+//   - [sass] sourcemap:   true to emit .css.map files (default false)
 const defaultIni = `[build]
 source = assets
 target = public
@@ -33,18 +55,45 @@ target = public
 
 [sass]
 version = 1.79.2
-entrypoints = 
+entrypoints =
+style = compressed
+sourcemap = false
 `
 
+// sassConfig holds the [sass] section of packly.ini.
+type sassConfig struct {
+	// Version is the dart-sass release to download, e.g. "1.79.2".
+	Version string
+	// Entrypoints are the Sass files to compile, relative to the source folder.
+	Entrypoints []string
+	// Style is the CSS output style passed to --style: "compressed" or "expanded".
+	Style string
+	// SourceMap enables source map generation; when false, --no-source-map is passed.
+	SourceMap bool
+}
+
+// v is the Packly version.
 var v = "1.0.0"
+
+// httpClient is shared by every download so that a stalled server cannot
+// block Packly forever.
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
-func loadConfig() (string, string, []string, map[string][]string, string, []string) {
+// loadConfig reads packly.ini, creating it from defaultIni first if it does
+// not exist, and returns, in order:
+//   - the source folder,
+//   - the destination folder (<target>/build),
+//   - the ignore patterns from [build] ignore,
+//   - the dependencies, mapping each package name to its list of URLs,
+//   - the Sass settings.
+//
+// The program exits if the file cannot be parsed or contains an invalid
+// Sass style.
+func loadConfig() (string, string, []string, map[string][]string, sassConfig) {
 	var src, dest string
 	var ignores []string
 	var deps map[string][]string
-	var sassVersion string
-	var sassEps []string
+	var sass sassConfig
 
 	filename := "packly.ini"
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
@@ -80,19 +129,28 @@ func loadConfig() (string, string, []string, map[string][]string, string, []stri
 	}
 
 	sassSec := cfg.Section("sass")
-	sassVersion = sassSec.Key("version").String()
+	sass.Version = sassSec.Key("version").String()
 	if sassSec.HasKey("entrypoints") {
 		eps := sassSec.Key("entrypoints").String()
 		for _, ep := range strings.Split(eps, ",") {
-			sassEps = append(sassEps, strings.TrimSpace(ep))
+			// Skip blanks so an empty "entrypoints =" means no Sass at all.
+			if ep = strings.TrimSpace(ep); ep != "" {
+				sass.Entrypoints = append(sass.Entrypoints, ep)
+			}
 		}
 	}
+	sass.Style = strings.ToLower(sassSec.Key("style").MustString("compressed"))
+	if sass.Style != "compressed" && sass.Style != "expanded" {
+		log.Fatalf("Invalid [sass] style '%s' in packly.ini: expected 'compressed' or 'expanded'", sass.Style)
+	}
+	sass.SourceMap = sassSec.Key("sourcemap").MustBool(false)
 
-	return src, dest, ignores, deps, sassVersion, sassEps
+	return src, dest, ignores, deps, sass
 }
 
+// copyFile copies the file at src to dst, creating dst's parent folders when
+// needed and overwriting dst if it already exists.
 func copyFile(src, dst string) error {
-
 	dir := filepath.Dir(dst)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -114,11 +172,16 @@ func copyFile(src, dst string) error {
 	return err
 }
 
+// md5sum returns the hex-encoded MD5 hash of s. It is only used to build
+// short, filesystem-safe marker names from URLs, not for security.
 func md5sum(s string) string {
 	h := md5.Sum([]byte(s))
 	return hex.EncodeToString(h[:])
 }
 
+// downloadFile fetches urlStr into a new temporary file and returns its path.
+// Any status other than 200 OK is an error. The caller is responsible for
+// removing the temporary file.
 func downloadFile(urlStr string) (string, error) {
 	resp, err := httpClient.Get(urlStr)
 	if err != nil {
@@ -140,7 +203,24 @@ func downloadFile(urlStr string) (string, error) {
 	return tmp.Name(), err
 }
 
-func unzip(source, destination string) error {
+// safeJoin joins an archive entry name to the destination directory and
+// refuses any entry that would escape it (e.g. "../../etc/passwd").
+func safeJoin(destination, name string) (string, error) {
+	outPath := filepath.Join(destination, name)
+	cleanDest := filepath.Clean(destination) + string(os.PathSeparator)
+	if !strings.HasPrefix(outPath+string(os.PathSeparator), cleanDest) {
+		return "", fmt.Errorf("illegal path in archive: %s", name)
+	}
+	return outPath, nil
+}
+
+// unzip extracts the zip archive at source into destination.
+//
+// When stripRoot is true and the archive's first entry is a folder (as in
+// GitHub archives, e.g. "project-main/"), that folder prefix is removed so
+// its contents land directly in destination. Entries matched by isIgnored
+// (docs, tests, demos...) are skipped.
+func unzip(source, destination string, stripRoot bool) error {
 	r, err := zip.OpenReader(source)
 	if err != nil {
 		return err
@@ -148,7 +228,7 @@ func unzip(source, destination string) error {
 	defer r.Close()
 
 	var root string
-	if len(r.File) > 0 && r.File[0].FileInfo().IsDir() {
+	if stripRoot && len(r.File) > 0 && r.File[0].FileInfo().IsDir() {
 		root = r.File[0].Name
 	}
 
@@ -160,7 +240,10 @@ func unzip(source, destination string) error {
 		if p == "" || isIgnored(p) {
 			continue
 		}
-		outPath := filepath.Join(destination, p)
+		outPath, err := safeJoin(destination, p)
+		if err != nil {
+			return err
+		}
 
 		if f.FileInfo().IsDir() {
 			os.MkdirAll(outPath, 0755)
@@ -187,6 +270,8 @@ func unzip(source, destination string) error {
 	return nil
 }
 
+// untar extracts the gzip-compressed tar archive at source into destination,
+// keeping each file's permissions (needed for executables such as sass).
 func untar(source, destination string) error {
 	file, err := os.Open(source)
 	if err != nil {
@@ -210,7 +295,10 @@ func untar(source, destination string) error {
 			return err
 		}
 
-		outPath := filepath.Join(destination, header.Name)
+		outPath, err := safeJoin(destination, header.Name)
+		if err != nil {
+			return err
+		}
 		info := header.FileInfo()
 
 		if info.IsDir() {
@@ -232,6 +320,9 @@ func untar(source, destination string) error {
 	return nil
 }
 
+// isIgnored reports whether an archive entry should be left out when
+// installing a dependency: documentation, tests, demos, samples and CI files
+// are not needed to serve the assets.
 func isIgnored(p string) bool {
 	p = strings.ToLower(filepath.ToSlash(p))
 	ignores := []string{"/docs/", "/site/", "/tests/", "/test/", "/demo/", "/samples/", ".github", ".travis.yml"}
@@ -243,10 +334,17 @@ func isIgnored(p string) bool {
 	return false
 }
 
+// installDependencies downloads every dependency into <source>/vendor/<name>.
+//
+// Each URL that installs successfully leaves a hidden marker file named after
+// the URL's hash, so later runs skip it. Changing a URL in packly.ini
+// therefore triggers a new download. With force, each package folder is
+// deleted first so everything is reinstalled. Any failure stops the program.
 func installDependencies(source string, deps map[string][]string, force bool) {
 	vendor := filepath.Join(source, "vendor")
 	_ = os.MkdirAll(vendor, 0755)
 
+	// Keep downloaded files out of version control.
 	gitIgnore := filepath.Join(vendor, ".gitignore")
 	if _, err := os.Stat(gitIgnore); os.IsNotExist(err) {
 		_ = os.WriteFile(gitIgnore, []byte("*"), 0644)
@@ -298,8 +396,10 @@ func installDependencies(source string, deps map[string][]string, force bool) {
 				}
 			}
 
+			// Archives are extracted; any other file is copied under its
+			// URL file name, without the query string.
 			if strings.HasSuffix(strings.ToLower(urlStr), ".zip") {
-				if err := unzip(tmp, target); err != nil {
+				if err := unzip(tmp, target, true); err != nil {
 					os.Remove(tmp)
 					log.Fatalf("Failed to unzip '%s': %v", urlStr, err)
 				}
@@ -322,8 +422,34 @@ func installDependencies(source string, deps map[string][]string, force bool) {
 	fmt.Println("\nAll dependencies processed.")
 }
 
-func compileSass(src string, dest string, sassVersion string, entrypoints []string) {
-	if len(entrypoints) == 0 {
+// sassArchiveName returns the dart-sass release asset matching the current
+// OS and architecture, e.g. "dart-sass-1.79.2-macos-arm64.tar.gz".
+func sassArchiveName(version string) (string, error) {
+	osNames := map[string]string{"linux": "linux", "darwin": "macos", "windows": "windows"}
+	archNames := map[string]string{"amd64": "x64", "arm64": "arm64"}
+
+	osName, okOS := osNames[runtime.GOOS]
+	archName, okArch := archNames[runtime.GOARCH]
+	if !okOS || !okArch {
+		return "", fmt.Errorf("unsupported platform for dart-sass: %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	extension := ".tar.gz"
+	if runtime.GOOS == "windows" {
+		extension = ".zip"
+	}
+	return fmt.Sprintf("dart-sass-%s-%s-%s%s", version, osName, archName, extension), nil
+}
+
+// compileSass compiles each Sass entrypoint from src into a .css file at the
+// same relative path in dest, using the output style and source map setting
+// from sass (minified and without source map by default).
+//
+// The dart-sass binary is downloaded on first use into ./.sass (ignored by
+// git) and reused afterwards. Missing entrypoints only print a warning; a
+// compilation error stops the program and shows the Sass output.
+func compileSass(src string, dest string, sass sassConfig) {
+	if len(sass.Entrypoints) == 0 {
 		return
 	}
 
@@ -336,15 +462,11 @@ func compileSass(src string, dest string, sassVersion string, entrypoints []stri
 	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
 		fmt.Println("Sass binary not found. Downloading...")
 
-		arch := "linux-x64"
-		if runtime.GOOS == "windows" {
-			arch = "windows-x64"
+		archiveName, err := sassArchiveName(sass.Version)
+		if err != nil {
+			log.Fatalf("%v", err)
 		}
-		if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
-			arch = "macos-arm64"
-		}
-
-		binaryURL := fmt.Sprintf("https://github.com/sass/dart-sass/releases/download/%s/dart-sass-%s-%s.tar.gz", sassVersion, sassVersion, arch)
+		binaryURL := fmt.Sprintf("https://github.com/sass/dart-sass/releases/download/%s/%s", sass.Version, archiveName)
 
 		tmp, err := downloadFile(binaryURL)
 		if err != nil {
@@ -361,7 +483,7 @@ func compileSass(src string, dest string, sassVersion string, entrypoints []stri
 		}
 
 		if strings.HasSuffix(strings.ToLower(binaryURL), ".zip") {
-			if err := unzip(tmp, target); err != nil {
+			if err := unzip(tmp, target, false); err != nil {
 				log.Fatalf("Failed to unzip Sass: %v", err)
 			}
 		} else if strings.HasSuffix(strings.ToLower(binaryURL), ".tar.gz") {
@@ -372,13 +494,19 @@ func compileSass(src string, dest string, sassVersion string, entrypoints []stri
 			log.Fatalf("Unsupported archive format for Sass: %s", binaryURL)
 		}
 
+		// Make sure the extracted script is executable on Unix systems.
 		if runtime.GOOS != "windows" {
 			_ = os.Chmod(binaryPath, 0755)
 		}
 		fmt.Println("Sass binary installed successfully.")
 	}
 
-	for _, ep := range entrypoints {
+	args := []string{"--style=" + sass.Style}
+	if !sass.SourceMap {
+		args = append(args, "--no-source-map")
+	}
+
+	for _, ep := range sass.Entrypoints {
 		inputPath := filepath.Join(src, ep)
 		if _, err := os.Stat(inputPath); os.IsNotExist(err) {
 			fmt.Printf("Warning: Sass entrypoint not found: %s\n", inputPath)
@@ -389,14 +517,21 @@ func compileSass(src string, dest string, sassVersion string, entrypoints []stri
 		_ = os.MkdirAll(filepath.Dir(outputPath), 0755)
 		fmt.Printf("Compiling Sass: %s -> %s\n", inputPath, outputPath)
 
-		cmd := exec.Command(binaryPath, "--style=compressed", "--no-source-map", inputPath, outputPath)
+		cmd := exec.Command(binaryPath, append(args, inputPath, outputPath)...)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			log.Fatalf("Sass compilation failed for %s: %v\nOutput:\n%s", inputPath, err, string(output))
 		}
 	}
 }
 
-func build(src string, dest string, ignores []string, sassVersion string, sassEps []string) {
+// build produces a fresh copy of src in dest, then compiles the Sass
+// entrypoints into it.
+//
+// dest is emptied first so deleted source files do not linger. The copy
+// skips Sass sources (they are compiled instead), hidden files and folders
+// (names starting with "."), and any path listed in ignores. The program
+// exits if the build fails.
+func build(src string, dest string, ignores []string, sass sassConfig) {
 	fmt.Printf("Building assets from '%s' to '%s'...\n", src, dest)
 	_ = os.RemoveAll(dest)
 
@@ -422,6 +557,9 @@ func build(src string, dest string, ignores []string, sassVersion string, sassEp
 			return nil
 		}
 
+		// An ignore entry matches the path itself or anything inside it.
+		// Paths are compared with forward slashes so packly.ini works the
+		// same on every OS.
 		for _, ignore := range ignores {
 			normRel := filepath.ToSlash(rel)
 			normIgnore := strings.TrimSuffix(filepath.ToSlash(ignore), "/")
@@ -443,20 +581,23 @@ func build(src string, dest string, ignores []string, sassVersion string, sassEp
 		log.Fatalf("Build failed: %v", err)
 	}
 
-	compileSass(src, dest, sassVersion, sassEps)
+	compileSass(src, dest, sass)
 	fmt.Println("Build completed successfully.")
 }
 
-// N'oublie pas d'importer "time" et "sync" au début de ton fichier.
-
-func watch(src, dest string, ignores []string, sassURL string, sassEps []string) {
+// watch monitors src and rebuilds into dest whenever a file changes. It runs
+// until the program is stopped.
+//
+// fsnotify does not watch subfolders recursively, so each folder is added
+// one by one, and newly created folders are added as they appear. The vendor
+// folder and the ignored paths are not watched.
+func watch(src, dest string, ignores []string, sass sassConfig) {
 	watcher, _ := fsnotify.NewWatcher()
 	defer watcher.Close()
 
-	// 1. Fonction courte pour surveiller les dossiers (et ignorer vendor/ignores)
+	// watchFolders adds root and all of its subfolders to the watcher.
 	watchFolders := func(root string) {
 		filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-
 			if d.IsDir() && d.Name() == "vendor" {
 				return filepath.SkipDir
 			}
@@ -473,14 +614,17 @@ func watch(src, dest string, ignores []string, sassURL string, sassEps []string)
 		})
 	}
 
-	watchFolders(src) // Scanner les dossiers existants
+	watchFolders(src)
 	fmt.Println("Watching for changes in", src)
 
+	// An editor save often fires several events in a row. Each event resets
+	// a 300 ms timer, so only one build runs once things settle. The mutex
+	// keeps two builds from ever running at the same time.
 	var timer *time.Timer
 	var mu sync.Mutex
 
 	for event := range watcher.Events {
-
+		// Ignore editor backup files ("file~") and hidden files.
 		if strings.HasSuffix(event.Name, "~") || strings.HasPrefix(filepath.Base(event.Name), ".") {
 			continue
 		}
@@ -496,11 +640,12 @@ func watch(src, dest string, ignores []string, sassURL string, sassEps []string)
 		timer = time.AfterFunc(300*time.Millisecond, func() {
 			mu.Lock()
 			defer mu.Unlock()
-			build(src, dest, ignores, sassURL, sassEps)
+			build(src, dest, ignores, sass)
 		})
 	}
 }
 
+// printUsage prints the list of available commands.
 func printUsage() {
 	fmt.Println("Usage: packly <command> [options]")
 	fmt.Println()
@@ -509,6 +654,8 @@ func printUsage() {
 	fmt.Println("  build [--watch]      Build assets based on the configuration. Use --watch to monitor changes.")
 }
 
+// Getcwd returns the current working directory, or an empty string if it
+// cannot be determined.
 func Getcwd() string {
 	dir, err := os.Getwd()
 	if err != nil {
@@ -517,6 +664,7 @@ func Getcwd() string {
 	return dir
 }
 
+// main loads the configuration, then dispatches to the requested command.
 func main() {
 	fmt.Println("📦 Packly - Asset Bundler & Dependency Manager for Web")
 	fmt.Println("---------------------------------------------------------")
@@ -527,7 +675,7 @@ func main() {
 	}
 
 	command := os.Args[1]
-	src, dest, ignores, deps, sassVersion, sassEps := loadConfig()
+	src, dest, ignores, deps, sass := loadConfig()
 
 	osName := runtime.GOOS
 	archName := runtime.GOARCH
@@ -550,9 +698,9 @@ func main() {
 			buildCmd.Parse(os.Args[2:])
 		}
 
-		build(src, dest, ignores, sassVersion, sassEps)
+		build(src, dest, ignores, sass)
 		if *watchFlag {
-			watch(src, dest, ignores, sassVersion, sassEps)
+			watch(src, dest, ignores, sass)
 		}
 	default:
 		fmt.Printf("Error: Unknown command '%s'\n\n", command)
