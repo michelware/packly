@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Packly — frontend assets for server-rendered apps, no Node.js</title>
+<meta name="description" content="Packly is a single Go binary that vendors frontend dependencies and compiles Sass for server-rendered apps. One .ini file. No Node.js. Nothing injected into your HTML.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="logo" href="./">packly<span>/</span></a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="#how">How it works</a>
+      <a href="#why">Why Packly</a>
+      <a href="#compare">Compare</a>
+      <a href="docs.html">Documentation</a>
+      <a href="https://github.com/michelware/packly">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <div class="hero">
+      <p class="eyebrow">Single Go binary · Linux · macOS · Windows</p>
+      <h1>The frontend toolchain for server-rendered apps.</h1>
+      <p class="lead">One binary. One <code>.ini</code>. No Node.js. Packly downloads your frontend dependencies, compiles your Sass, and leaves your HTML alone.</p>
+      <div class="actions">
+        <a class="button primary" href="docs.html#install">Install Packly</a>
+        <a class="button" href="docs.html">Read the docs</a>
+      </div>
+    </div>
+  </div>
+
+  <section id="how">
+    <div class="wrap">
+      <p class="label">How it works</p>
+      <h2>Declare. Install. Build.</h2>
+      <p class="section-lead">Three steps, nothing hidden. Every file Packly produces is one you asked for, in a folder you chose.</p>
+      <div class="grid">
+        <div class="card">
+          <h3>1. Declare</h3>
+          <p>List the URLs of your frontend dependencies in one <code>packly.ini</code> file: CDN files or ZIP archives, pinned to the version you want.</p>
+        </div>
+        <div class="card">
+          <h3>2. Install</h3>
+          <p><code>packly install</code> downloads them into your project once. They are vendored locally and served from your own server.</p>
+        </div>
+        <div class="card">
+          <h3>3. Build</h3>
+          <p><code>packly build</code> copies your assets to <code>public/build/</code> and compiles your Sass. Add <code>--watch</code> and it rebuilds on every change.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="why">
+    <div class="wrap">
+      <p class="label">Why Packly</p>
+      <h2>Made for server-rendered apps.</h2>
+      <p class="section-lead">Your backend renders the HTML. You only need your CSS and JavaScript files in the right place, not a JavaScript build system.</p>
+      <div class="grid">
+        <div class="card">
+          <h3>No Node.js</h3>
+          <p>No <code>node_modules</code>, no <code>package.json</code>, no JavaScript toolchain to keep updated. One binary in your PATH.</p>
+        </div>
+        <div class="card">
+          <h3>Any backend</h3>
+          <p>PHP with or without a framework, Symfony, legacy apps, Go, Django, Flask. Packly only downloads, copies and compiles files into a folder.</p>
+        </div>
+        <div class="card">
+          <h3>Sass built in</h3>
+          <p>Name a dart-sass version. Packly fetches the official binary for your OS and compiles your stylesheets, minified by default.</p>
+        </div>
+        <div class="card">
+          <h3>Your HTML stays yours</h3>
+          <p>No generated import maps, no injected tags. You write your own <code>&lt;link&gt;</code>, <code>&lt;script&gt;</code> and import map.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="compare">
+    <div class="wrap">
+      <p class="label">Compare</p>
+      <h2>Like AssetMapper or importmap-rails, without the framework.</h2>
+      <p class="section-lead">Those tools proved that server-rendered apps do not need Node.js. Packly does the same job for any backend, as one binary.</p>
+      <div class="table-box">
+        <table>
+          <thead>
+            <tr><th></th><th>npm + Vite / Webpack</th><th>Symfony AssetMapper</th><th>importmap-rails</th><th class="us">Packly</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Runtime</td><td>Node.js</td><td>PHP, Symfony</td><td>Ruby, Rails</td><td class="us">Single Go binary</td></tr>
+            <tr><td>Framework</td><td>Any</td><td>Symfony only</td><td>Rails only</td><td class="us">Any</td></tr>
+            <tr><td>Sass</td><td>Loader or plugin</td><td>With SassBundle</td><td>Separate gem</td><td class="us">Built in, dart-sass fetched for your OS</td></tr>
+            <tr><td>Import map</td><td>Not used</td><td>Generated for you</td><td>Generated for you</td><td class="us">You write it</td></tr>
+            <tr><td>Bundling</td><td>Yes</td><td>No</td><td>No</td><td class="us">No, by design</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="never">
+    <div class="wrap">
+      <p class="label">Scope</p>
+      <h2>What Packly will never do</h2>
+      <p class="section-lead">A single Go file you can read in one sitting stays a tool you can trust. Packly will not grow into another bundler.</p>
+      <ul class="never">
+        <li>bundle your JavaScript</li>
+        <li>tree-shake</li>
+        <li>parse your code</li>
+        <li>inject tags into your HTML</li>
+        <li>load plugins</li>
+        <li>require a JS config file</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="get">
+    <div class="wrap">
+      <p class="label">Get Packly</p>
+      <h2>One download. Five platforms.</h2>
+      <p class="section-lead">Linux x64 and ARM64, macOS Intel and Apple Silicon, Windows x64. Download the binary, put it in your PATH, and you are ready.</p>
+      <div class="actions">
+        <a class="button primary" href="https://github.com/michelware/packly/releases/latest">Download the latest release</a>
+        <a class="button" href="docs.html#quick-start">Quick start guide</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">Packly · <a href="https://github.com/michelware/packly">Source on GitHub</a> · <a href="docs.html">Documentation</a></div>
+</footer>
+
+</body>
+</html>

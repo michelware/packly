@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Packly documentation</title>
+<meta name="description" content="Install and configure Packly: the 5 binaries, packly.ini reference, commands, build behavior, Sass options, watch mode and CI.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="logo" href="./">packly<span>/</span></a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="./">Home</a>
+      <a href="docs.html">Documentation</a>
+      <a href="https://github.com/michelware/packly">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+<div class="docs">
+
+<nav class="toc" aria-label="Documentation">
+  <ol>
+    <li><a href="#install">1. Install</a></li>
+    <li><a href="#quick-start">2. Quick start</a></li>
+    <li><a href="#config">3. packly.ini reference</a></li>
+    <li><a href="#install-cmd">4. packly install</a></li>
+    <li><a href="#build-cmd">5. packly build</a></li>
+    <li><a href="#sass">6. Sass</a></li>
+    <li><a href="#watch">7. Watch mode</a></li>
+    <li><a href="#html">8. Using the files in HTML</a></li>
+    <li><a href="#git-ci">9. Git and CI</a></li>
+  </ol>
+</nav>
+
+<article>
+<h1>Documentation</h1>
+<p>Everything Packly does, in the order it does it. Run every command from your project root: Packly reads <code>packly.ini</code> from the current directory.</p>
+
+<h2 id="install">1. Install</h2>
+<p>Packly ships as 5 standalone binaries. Download the one for your platform from the <a href="https://github.com/michelware/packly/releases/latest">latest release</a>:</p>
+<div class="table-box">
+<table>
+  <thead><tr><th>Platform</th><th>File</th></tr></thead>
+  <tbody>
+    <tr><td>Linux x64</td><td><code>packly-linux-amd64</code></td></tr>
+    <tr><td>Linux ARM64</td><td><code>packly-linux-arm64</code></td></tr>
+    <tr><td>macOS Intel</td><td><code>packly-macos-amd64</code></td></tr>
+    <tr><td>macOS Apple Silicon</td><td><code>packly-macos-arm64</code></td></tr>
+    <tr><td>Windows x64</td><td><code>packly-windows-amd64.exe</code></td></tr>
+  </tbody>
+</table>
+</div>
+<p>Linux and macOS: make it executable and put it in your PATH.</p>
+<pre>$ chmod +x packly-linux-amd64
+$ sudo mv packly-linux-amd64 /usr/local/bin/packly
+$ packly                <span class="c"># prints the available commands</span></pre>
+<p>Windows: rename the file to <code>packly.exe</code> and place it in a folder listed in your <code>PATH</code>.</p>
+
+<h2 id="quick-start">2. Quick start</h2>
+<p>Create <code>packly.ini</code> at your project root, or let the first <code>packly install</code> generate a default one, then fill it in:</p>
+<pre><span class="k">[build]</span>
+<span class="k">source</span> = <span class="v">assets</span>
+<span class="k">target</span> = <span class="v">public</span>
+
+<span class="k">[dependencies]</span>
+<span class="k">bootstrap</span> = <span class="v">https://github.com/twbs/bootstrap/archive/refs/tags/v5.3.3.zip</span>
+<span class="k">confetti</span>  = <span class="v">https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.module.mjs</span>
+
+<span class="k">[sass]</span>
+<span class="k">version</span>     = <span class="v">1.79.2</span>
+<span class="k">entrypoints</span> = <span class="v">styles/app.scss</span></pre>
+<p>Then run:</p>
+<pre>$ packly install        <span class="c"># downloads into assets/vendor/</span>
+$ packly build          <span class="c"># copies to public/build/ and compiles Sass</span>
+$ packly build --watch  <span class="c"># same, then rebuilds on every change</span></pre>
+<p>Your files are now in <code>public/build/</code>. See <a href="#html">Using the files in HTML</a> to load them in your pages.</p>
+
+<h2 id="config">3. packly.ini reference</h2>
+<p>If the file does not exist, the first <code>packly install</code> or <code>packly build</code> creates it with defaults. It has three sections.</p>
+
+<h3>[build]</h3>
+<div class="table-box">
+<table>
+  <thead><tr><th>Key</th><th>Default</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>source</code></td><td><code>assets</code></td><td>Folder holding your own assets and the <code>vendor/</code> folder.</td></tr>
+    <tr><td><code>target</code></td><td><code>public</code></td><td>Public folder. Packly always writes into <code>&lt;target&gt;/build/</code>.</td></tr>
+    <tr><td><code>ignore</code></td><td>empty</td><td>Comma-separated paths, relative to <code>source</code>, never copied to the build. Example: <code>vendor/bootstrap</code> when you only need its Sass sources.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>[dependencies]</h3>
+<p>One line per dependency. The key is the folder name, the value is one or more comma-separated URLs.</p>
+<pre><span class="k">[dependencies]</span>
+<span class="c">; single file → assets/vendor/jquery/jquery.min.js</span>
+<span class="k">jquery</span> = <span class="v">https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js</span>
+<span class="c">; several files in one folder</span>
+<span class="k">leaflet</span> = <span class="v">https://unpkg.com/leaflet@1.9.4/dist/leaflet.js, https://unpkg.com/leaflet@1.9.4/dist/leaflet.css</span>
+<span class="c">; ZIP archive → extracted into assets/vendor/bootstrap/</span>
+<span class="k">bootstrap</span> = <span class="v">https://github.com/twbs/bootstrap/archive/refs/tags/v5.3.3.zip</span></pre>
+<div class="note"><strong>Always put the version in the URL.</strong> A URL without a version (<code>unpkg.com/leaflet/dist/leaflet.css</code>) can return a different file tomorrow.</div>
+
+<h3>[sass]</h3>
+<div class="table-box">
+<table>
+  <thead><tr><th>Key</th><th>Default</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>version</code></td><td><code>1.79.2</code> in the generated file</td><td>dart-sass version to download. Required as soon as you have entrypoints.</td></tr>
+    <tr><td><code>entrypoints</code></td><td>empty</td><td>Comma-separated files, relative to <code>source</code>, compiled to CSS. Example: <code>styles/app.scss, styles/admin.scss</code>. Leave empty to skip Sass: nothing is downloaded.</td></tr>
+    <tr><td><code>style</code></td><td><code>compressed</code></td><td>CSS output style: <code>compressed</code> (minified) or <code>expanded</code> (readable, handy in development). Any other value stops Packly with an error.</td></tr>
+    <tr><td><code>sourcemap</code></td><td><code>false</code></td><td>Set to <code>true</code> to write a <code>.css.map</code> file next to each CSS file.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="install-cmd">4. packly install</h2>
+<pre>$ packly install
+$ packly install --force   <span class="c"># delete and download every dependency again</span></pre>
+<ol>
+  <li>Creates <code>&lt;source&gt;/vendor/</code> and a <code>.gitignore</code> inside it that ignores everything.</li>
+  <li>Processes dependencies in alphabetical order.</li>
+  <li>For each URL, skips it if it was already installed. Packly keeps a hidden marker file per URL, so changing a URL triggers a new download.</li>
+  <li>A URL ending in <code>.zip</code> is extracted. If the archive starts with a root folder (like GitHub archives), that folder is removed so files land directly in <code>vendor/&lt;key&gt;/</code>. Folders named <code>docs</code>, <code>site</code>, <code>test</code>, <code>tests</code>, <code>demo</code>, <code>samples</code> and <code>.github</code> are skipped.</li>
+  <li>Any other URL is saved as a single file, named after the last part of the URL, query string removed.</li>
+</ol>
+<p>Archive entries that would write outside the target folder (<code>../</code>) are rejected. Downloads time out after 30 seconds. Any failed download or extraction stops Packly with an error; dependencies already installed stay installed.</p>
+
+<h2 id="build-cmd">5. packly build</h2>
+<pre>$ packly build</pre>
+<ol>
+  <li><strong>Deletes <code>&lt;target&gt;/build/</code></strong>, then recreates it. Never put files there by hand.</li>
+  <li>Copies every file of <code>source</code> into it, keeping the folder structure, except <code>.scss</code> and <code>.sass</code> files, hidden files and folders, and paths listed in <code>ignore</code>.</li>
+  <li>Compiles each Sass entrypoint (next section).</li>
+</ol>
+
+<h2 id="sass">6. Sass</h2>
+<p>On the first build with at least one entrypoint, Packly downloads the official dart-sass release for your OS and architecture into <code>.sass/</code> at your project root, with a <code>.gitignore</code>. This works on the same 5 platforms as Packly itself.</p>
+<p>Each entrypoint is compiled to the same relative path, with a <code>.css</code> extension:</p>
+<pre><span class="c">assets/styles/app.scss  →  public/build/styles/app.css</span></pre>
+<p>By default the CSS is compressed and no source map is written. For development, switch both in <code>packly.ini</code>:</p>
+<pre><span class="k">[sass]</span>
+<span class="k">style</span>     = <span class="v">expanded</span>
+<span class="k">sourcemap</span> = <span class="v">true</span>   <span class="c">; also writes public/build/styles/app.css.map</span></pre>
+<p>An entrypoint that does not exist only prints a warning. A Sass compilation error stops Packly and shows the dart-sass output.</p>
+<p>To change the Sass version, edit <code>version</code> and delete the <code>.sass/</code> folder.</p>
+
+<h2 id="watch">7. Watch mode</h2>
+<pre>$ packly build --watch</pre>
+<p>Builds once, then watches every folder of <code>source</code> except <code>vendor/</code> and ignored paths. After a change, it waits 300 ms for other changes, then runs a full build. New folders are watched automatically. Hidden files and editor backup files (ending in <code>~</code>) do not trigger a build.</p>
+<div class="note"><strong>Watch mode stops on build errors.</strong> A Sass syntax error, for example, ends the process: fix the file and run <code>packly build --watch</code> again.</div>
+<p>Since <code>vendor/</code> is not watched, run <code>packly install</code> then <code>packly build</code> after changing dependencies.</p>
+
+<h2 id="html">8. Using the files in HTML</h2>
+<p>Packly never touches your templates. You reference the files in <code>/build/</code> yourself:</p>
+<pre>&lt;link rel="stylesheet" href="/build/styles/app.css"&gt;
+
+&lt;script type="importmap"&gt;
+{
+  "imports": {
+    "confetti": "/build/vendor/confetti/confetti.module.mjs"
+  }
+}
+&lt;/script&gt;
+
+&lt;script type="module" src="/build/js/app.js"&gt;&lt;/script&gt;</pre>
+<p>Then <code>import confetti from 'confetti';</code> works natively in the browser.</p>
+
+<h2 id="git-ci">9. Git and CI</h2>
+<p>Commit <code>packly.ini</code>. Packly already ignores <code>vendor/</code> and <code>.sass/</code>. Add the build output to your own <code>.gitignore</code>:</p>
+<pre>public/build/</pre>
+<p>In CI or on deploy, run both commands:</p>
+<pre>$ packly install
+$ packly build</pre>
+
+</article>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">Packly · <a href="https://github.com/michelware/packly">Source on GitHub</a></div>
+</footer>
+
+</body>
+</html>
